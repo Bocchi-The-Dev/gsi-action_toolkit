@@ -11,6 +11,7 @@ A GitHub Actions workflow to customize Android Treble Generic System Images (GSI
 - Preserve the original ROM filename
 - Generate SHA256 checksum
 - Upload artifacts automatically
+- Upload a mirror of the image + checksum to [GoFile](https://gofile.io)
 
 ## Requirements
 
@@ -46,6 +47,14 @@ Example output files:
 Axion-2.7_GSI_treble_arm64-ab-GAPPS-EROFS-20260711.img.xz
 
 Axion-2.7_GSI_treble_arm64-ab-GAPPS-EROFS-20260711.img.xz.sha256
+
+## GoFile mirror
+
+After the build, the workflow uploads the image and its checksum to [GoFile](https://gofile.io) and prints the download links in the job summary.
+
+- **No setup required**: without a token, the workflow creates a temporary guest account and uploads there.
+- **Persistent mirrors (recommended)**: add a GoFile account token as a repository secret named `GOFILE_TOKEN` (Settings → Secrets and variables → Actions → New repository secret). Uploads then go to your account, so files aren't deleted by GoFile's guest-expiry policy.
+- If GoFile is unreachable the build still succeeds — the GitHub artifact upload already ran, and the mirror step is non-blocking (`continue-on-error`).
 
 ## License
 

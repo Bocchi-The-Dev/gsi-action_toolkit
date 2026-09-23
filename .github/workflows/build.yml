@@ -174,3 +174,13 @@ jobs:
           path: ${{ steps.artifact_finder.outputs.checksum_path }}
           compression-level: 0
           if-no-files-found: error
+
+      - name: Upload mirrors to GoFile
+        id: gofile
+        continue-on-error: true
+        env:
+          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
+        run: |
+          ./scripts/gofile_upload.sh \
+            "${{ steps.artifact_finder.outputs.artifact_path }}" \
+            "${{ steps.artifact_finder.outputs.checksum_path }}"
