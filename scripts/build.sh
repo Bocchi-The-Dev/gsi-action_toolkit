@@ -56,6 +56,7 @@ if [ "$EUID" -ne 0 ]; then
          REMOVE_VNDK_V31="${REMOVE_VNDK_V31:-false}" \
          REMOVE_VNDK_V32="${REMOVE_VNDK_V32:-false}" \
          REMOVE_VNDK_V33="${REMOVE_VNDK_V33:-false}" \
+         REMOVE_VNDK_V34="${REMOVE_VNDK_V34:-false}" \
          REMOVE_WALLPAPERS="${REMOVE_WALLPAPERS:-false}" \
          REMOVE_SOUNDS="${REMOVE_SOUNDS:-false}" \
          REMOVE_FONTS="${REMOVE_FONTS:-false}" \
@@ -73,7 +74,7 @@ mkdir -p "$SYS_DIR"
 log_info "Calculating GSI naming..."
 # Check if any VNDKs were removed
 REMOVE_VNDK="false"
-for ver in 28 29 30 31 32 33; do
+for ver in 28 29 30 31 32 33 34; do
     var_name="REMOVE_VNDK_V${ver}"
     if [ "${!var_name:-false}" = "true" ]; then
         REMOVE_VNDK="true"
@@ -296,7 +297,7 @@ if [ "$REMOVE_VNDK" = "true" ]; then
     log_header "Remove selected VNDKs"
     run_cmd bash "$SCRIPT_DIR/remove_vndk.sh" "$SYS_DIR"
     echo -e "${TICK} Removed:"
-    for ver in 28 29 30 31 32 33; do
+    for ver in 28 29 30 31 32 33 34; do
         var_name="REMOVE_VNDK_V${ver}"
         if [ "${!var_name:-false}" = "true" ]; then
             echo "  - v$ver"
