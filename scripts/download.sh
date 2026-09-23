@@ -64,5 +64,28 @@ if [ ! -f "$OUTPUT_PATH" ] || [ ! -s "$OUTPUT_PATH" ]; then
     exit 1
 fi
 
+# Sanity-check that the downloaded content matches the expected archive type.
+# A common failure is SourceForge serving an HTML error page (expired signed
+# URL) or a mirror returning a stale/corrupt file under the expected name.
+# NOTE: strip the query string first - SourceForge URLs carry signed params
+# after '?' that would otherwise hide the real file extension.
+EXPECTED_TYPE=""
+URL_BASE="${GSI_URL%%\?*}"
+case "$URL_BASE" in
+    *.7z)      EXPECTED_TYPE="7-zip" ;;
+    *.zip)     EXPECTED_TYPE="Zip archive" ;;
+    *.tar.gz|*.tgz) EXPECTED_TYPE="gzip compressed" ;;
+    *.xz)      EXPECTED_TYPE="XZ compressed" ;;
+    *.img)     EXPECTED_TYPE="" ;; # raw image: file(1) output varies, skip
+esac
+if [ -n "$EXPECTED_TYPE" ]; then
+    ACTUAL_TYPE=$(file -b "$OUTPUT_PATH" 2>/dev/null || true)
+    if ! echo "$ACTUAL_TYPE" | grep -qi "$EXPECTED_TYPE"; then
+        log_error "Downloaded file does not look like the expected type ($EXPECTED_TYPE). Got: '$ACTUAL_TYPE'"
+        log_error "The download URL may be expired or the mirror may be serving stale content. Retry with a fresh URL."
+        exit 1
+    fi
+fi
+
 log_success "Download completed successfully!"
 ls -lh "$OUTPUT_PATH"

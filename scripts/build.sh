@@ -169,14 +169,19 @@ log_info "Target Image Filename: $OUT_IMG_NAME"
 log_info "Output Filename: $OUT_FILE_NAME"
 
 # Download setup
+# Match on the URL with any query string stripped: SourceForge URLs carry
+# signed parameters after '?' (e.g. ".../GSI.7z?viasf=1&fid=...") which would
+# otherwise hide the real extension and make us mis-handle the archive as a
+# raw .img (a copy of the archive itself) instead of extracting it.
 DOWNLOADED_FILE="$WORKSPACE_DIR/gsi_archive"
-if [[ "$GSI_URL" =~ \.xz$ ]]; then
+URL_BASE="${GSI_URL%%\?*}"
+if [[ "$URL_BASE" =~ \.xz$ ]]; then
     DOWNLOADED_FILE="${DOWNLOADED_FILE}.xz"
-elif [[ "$GSI_URL" =~ \.7z$ ]]; then
+elif [[ "$URL_BASE" =~ \.7z$ ]]; then
     DOWNLOADED_FILE="${DOWNLOADED_FILE}.7z"
-elif [[ "$GSI_URL" =~ \.zip$ ]]; then
+elif [[ "$URL_BASE" =~ \.zip$ ]]; then
     DOWNLOADED_FILE="${DOWNLOADED_FILE}.zip"
-elif [[ "$GSI_URL" =~ \.tar\.gz$ || "$GSI_URL" =~ \.tgz$ ]]; then
+elif [[ "$URL_BASE" =~ \.tar\.gz$ || "$URL_BASE" =~ \.tgz$ ]]; then
     DOWNLOADED_FILE="${DOWNLOADED_FILE}.tar.gz"
 else
     DOWNLOADED_FILE="${DOWNLOADED_FILE}.img"
@@ -195,34 +200,88 @@ log_step_success "Extraction complete"
 
 # Detect Filesystem of original RAW image
 log_header "Detect filesystem type"
+
+# Prints "<fs_type> <byte_offset>" on success, where byte_offset is where the
+# filesystem actually starts inside the raw image (some GSIs pad the start of
+# the partition image). Detection is done by matching superblock magic bytes
+# directly, so it does not depend on blkid/file(1) version quirks.
+# When nothing is recognized, diagnostics are printed to stderr and 1 is returned.
 detect_fs_type() {
     local img="$1"
-    local fs_type
-    fs_type=$(blkid -s TYPE -o value "$img" 2>/dev/null || true)
-    if [ -z "$fs_type" ]; then
-        local file_info
-        file_info=$(file -b "$img")
-        if echo "$file_info" | grep -qi "erofs"; then
-            fs_type="erofs"
-        elif echo "$file_info" | grep -qi "ext4"; then
-            fs_type="ext4"
+    local candidate m1 m2
+    local -a offsets=(0 512 4096 65536)
+
+    for candidate in "${offsets[@]}"; do
+        # EROFS: superblock magic at filesystem offset 1024
+        #   v1 = 0xE0F5E1E2, v2 = 0xE2E1F5E0 (little-endian on disk)
+        m1=$(od -An -tx1 -N4 -j $((candidate + 1024)) "$img" 2>/dev/null | tr -d ' \n')
+        # ext2/3/4: magic 0xEF53 at superblock offset 1024 + 56
+        m2=$(od -An -tx1 -N2 -j $((candidate + 1080)) "$img" 2>/dev/null | tr -d ' \n')
+        case "$m1" in
+            e2e1f5e0|e0f5e1e2)
+                echo "erofs $candidate"
+                return 0
+                ;;
+        esac
+        if [ "$m2" = "53ef" ]; then
+            echo "ext4 $candidate"
+            return 0
         fi
+    done
+
+    # Fallback: let blkid do a full probe (handles exotic superblock positions)
+    local blk_type
+    blk_type=$(blkid -p -s TYPE -o value "$img" 2>/dev/null || true)
+    case "$blk_type" in
+        ext2|ext3|ext4) echo "ext4 0"; return 0 ;;
+        erofs)          echo "erofs 0"; return 0 ;;
+    esac
+
+    # Fallback: file(1) string matching
+    local file_info
+    file_info=$(file -b "$img" 2>/dev/null || true)
+    if echo "$file_info" | grep -qi "erofs"; then
+        echo "erofs 0"; return 0
+    elif echo "$file_info" | grep -qiE "ext[234]"; then
+        echo "ext4 0"; return 0
     fi
-    echo "$fs_type"
+
+    # Not a recognized raw filesystem image - dump diagnostics to help debugging
+    {
+        echo "File: $img"
+        echo "Size: $(stat -c '%s bytes' "$img" 2>/dev/null || echo 'unreadable')"
+        echo "file(1): $file_info"
+        echo "blkid -p: $(blkid -p "$img" 2>&1 || true)"
+        echo "first16: $(od -An -tx1 -N16 "$img" 2>/dev/null | tr -d ' \n')"
+        for candidate in "${offsets[@]}"; do
+            echo "offset $candidate: erofs_magic=$(od -An -tx1 -N4 -j $((candidate + 1024)) "$img" 2>/dev/null | tr -d ' \n') ext_magic=$(od -An -tx1 -N2 -j $((candidate + 1080)) "$img" 2>/dev/null | tr -d ' \n')"
+        done
+    } >&2
+    return 1
 }
 
-ORIGINAL_FS=$(detect_fs_type "$INPUT_IMAGE")
-if [ -z "$ORIGINAL_FS" ]; then
-    log_error "Could not detect filesystem of GSI image $INPUT_IMAGE (must be ext4 or erofs)."
+DETECT_RESULT=""
+if ! DETECT_RESULT=$(detect_fs_type "$INPUT_IMAGE"); then
+    log_error "Could not detect filesystem of GSI image $INPUT_IMAGE (must be ext4 or erofs). See diagnostics above."
     exit 1
 fi
+ORIGINAL_FS="${DETECT_RESULT%% *}"
+FS_OFFSET="${DETECT_RESULT##* }"
 FS_UPPER=$(echo "$ORIGINAL_FS" | tr '[:lower:]' '[:upper:]')
-log_step_success "$FS_UPPER detected"
+if [ "$FS_OFFSET" -gt 0 ]; then
+    log_step_success "$FS_UPPER detected (filesystem starts at byte offset $FS_OFFSET)"
+else
+    log_step_success "$FS_UPPER detected"
+fi
 
 # 3. Mount GSI partition and copy contents
 log_header "Mount GSI partition"
 MNT_SRC=$(mktemp -d -p "$PWD" mnt_src.XXXXXX)
-if ! mount -o loop,ro "$INPUT_IMAGE" "$MNT_SRC" >/dev/null 2>&1; then
+MOUNT_OPTS="loop,ro"
+if [ "$FS_OFFSET" -gt 0 ]; then
+    MOUNT_OPTS="loop,ro,offset=$FS_OFFSET"
+fi
+if ! mount -o "$MOUNT_OPTS" "$INPUT_IMAGE" "$MNT_SRC" >/dev/null 2>&1; then
     log_error "Failed to mount GSI image read-only."
     rm -rf "$MNT_SRC"
     exit 1
