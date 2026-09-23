@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: false
+      remove_vndk_v34:
+        description: 'Remove VNDK v34 (Android 14)'
+        required: false
+        type: boolean
+        default: false
       remove_wallpapers:
         description: 'Remove pre-installed static wallpapers (except essential)'
         required: false
@@ -132,6 +137,7 @@ jobs:
           REMOVE_VNDK_V31: ${{ inputs.remove_vndk_v31 }}
           REMOVE_VNDK_V32: ${{ inputs.remove_vndk_v32 }}
           REMOVE_VNDK_V33: ${{ inputs.remove_vndk_v33 }}
+          REMOVE_VNDK_V34: ${{ inputs.remove_vndk_v34 }}
           REMOVE_WALLPAPERS: ${{ inputs.remove_wallpapers }}
           REMOVE_SOUNDS: ${{ inputs.remove_sounds }}
           REMOVE_FONTS: ${{ inputs.remove_fonts }}
