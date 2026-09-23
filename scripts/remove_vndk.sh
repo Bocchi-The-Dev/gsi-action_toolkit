@@ -72,7 +72,7 @@ remove_vndk_version() {
 }
 
 # Run for versions if environment variables are set to 'true'
-VNDK_VERSIONS=(28 29 30 31 32 33)
+VNDK_VERSIONS=(28 29 30 31 32 33 34)
 
 for ver in "${VNDK_VERSIONS[@]}"; do
     var_name="REMOVE_VNDK_V${ver}"
